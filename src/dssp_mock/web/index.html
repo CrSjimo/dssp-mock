@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>DSSP Mock 管理台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">♫</div>
+        <div>
+          <h1>DSSP Mock</h1>
+          <p>多实例歌声合成模拟服务</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="saveState" class="save-state" role="status">正在读取配置…</span>
+        <button id="reloadButton" class="button secondary" type="button">重新读取</button>
+        <button id="saveButton" class="button primary" type="button" disabled>保存配置</button>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="card resource-card" aria-labelledby="resourceTitle">
+        <div class="section-heading compact">
+          <div>
+            <span class="eyebrow">全局配置</span>
+            <h2 id="resourceTitle">共享资源服务</h2>
+          </div>
+          <p>为 HTTP 模式的头像、背景图和音频提供短期访问地址。</p>
+          <div id="resourceRuntime" class="resource-runtime" aria-live="polite">
+            <span id="resourceStatusBadge" class="status-badge unknown"><i></i>未知</span>
+            <span id="resourceStatusDetails">正在读取资源服务状态…</span>
+          </div>
+        </div>
+        <div id="resourceFields" class="form-grid resource-fields"></div>
+      </section>
+
+      <section class="workspace" aria-label="Mock 实例配置">
+        <aside class="card instance-sidebar">
+          <div class="sidebar-heading">
+            <div>
+              <span class="eyebrow">服务</span>
+              <h2>Mock 实例</h2>
+            </div>
+            <button id="addInstanceButton" class="icon-button" type="button" title="新增实例" aria-label="新增实例">+</button>
+          </div>
+          <div id="instanceList" class="selection-list" role="listbox" aria-label="Mock 实例"></div>
+          <div class="sidebar-note">
+            <span class="pulse-dot"></span>
+            <span>运行状态会自动刷新</span>
+          </div>
+        </aside>
+
+        <div id="instanceWorkspace" class="instance-workspace"></div>
+      </section>
+
+      <section class="card logs-card" aria-labelledby="logsTitle">
+        <div class="logs-toolbar">
+          <div>
+            <span class="eyebrow">可观测性</span>
+            <h2 id="logsTitle">请求 / 响应日志</h2>
+          </div>
+          <div class="toolbar-controls">
+            <label class="inline-field">
+              <span>实例</span>
+              <select id="logInstanceFilter">
+                <option value="">全部实例</option>
+              </select>
+            </label>
+            <button id="pauseLogsButton" class="button secondary small" type="button">暂停刷新</button>
+            <button id="clearLogsButton" class="button ghost small" type="button">清空视图</button>
+          </div>
+        </div>
+        <div id="logSummary" class="log-summary">尚无请求</div>
+        <div id="logList" class="log-list" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+    <dialog id="confirmDialog" class="confirm-dialog">
+      <form method="dialog">
+        <h2 id="confirmTitle">确认操作</h2>
+        <p id="confirmMessage"></p>
+        <div class="dialog-actions">
+          <button class="button secondary" value="cancel">取消</button>
+          <button id="confirmAccept" class="button danger" value="confirm">删除</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
