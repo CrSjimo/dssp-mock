@@ -19,6 +19,7 @@
     resourceStatus: {},
     logs: [],
     seenLogs: new Set(),
+    expandedLogs: new Set(),
     logCursor: null,
     logsPaused: false,
     statusTimer: null,
@@ -45,11 +46,15 @@
     return value === "" ? null : Number(value);
   }
 
-  function splitLanguages(value) {
-    return value
-      .split(/[,，\n]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
+  function normalizeLanguages(value) {
+    if (Array.isArray(value)) {
+      return Object.fromEntries(value.map((code) => [code, { name: code, default_lyric: "la" }]));
+    }
+    if (!value || typeof value !== "object") return {};
+    return Object.fromEntries(Object.entries(value).map(([code, info]) => [code, {
+      name: info && typeof info === "object" ? String(info.name ?? code) : code,
+      default_lyric: info && typeof info === "object" ? String(info.default_lyric ?? "la") : "la",
+    }]));
   }
 
   function uniqueId(prefix, values) {
@@ -74,6 +79,12 @@
       instance.port ??= 13711;
       instance.autostart ??= false;
       instance.parameter_sample_rate ??= 100;
+      instance.synthesis_delays_ms = instance.synthesis_delays_ms && typeof instance.synthesis_delays_ms === "object"
+        ? instance.synthesis_delays_ms
+        : {};
+      ["pronunciation", "phoneme", "duration", "parameter", "audio"].forEach((step) => {
+        instance.synthesis_delays_ms[step] ??= 0;
+      });
       instance.media_mode ??= "data_url";
       instance.resource_ttl_seconds ??= 300;
       instance.architectures = Array.isArray(instance.architectures)
@@ -111,8 +122,8 @@
           singer.id ??= "singer";
           singer.name ??= singer.id;
           singer.mix_group ??= "default";
-          singer.languages = Array.isArray(singer.languages) ? singer.languages : [];
-          singer.default_language ??= singer.languages[0] ?? "";
+          singer.languages = normalizeLanguages(singer.languages);
+          singer.default_language ??= Object.keys(singer.languages)[0] ?? "";
           singer.mock_key ??= singer.id;
           singer.demo_audios = Array.isArray(singer.demo_audios)
             ? singer.demo_audios
@@ -137,6 +148,13 @@
       port,
       autostart: false,
       parameter_sample_rate: 100,
+      synthesis_delays_ms: {
+        pronunciation: 0,
+        phoneme: 0,
+        duration: 0,
+        parameter: 0,
+        audio: 0,
+      },
       media_mode: "data_url",
       resource_ttl_seconds: 300,
       architectures: [],
@@ -175,7 +193,7 @@
       id,
       name: `歌手 ${arch.singers.length + 1}`,
       mix_group: "default",
-      languages: ["zh"],
+      languages: { zh: { name: "中文", default_lyric: "啦" } },
       default_language: "zh",
       mock_key: uniqueId("mock-key", usedMockKeys),
       demo_audios: [],
@@ -391,10 +409,31 @@
             <input data-instance-field="autostart" type="checkbox" ${instance.autostart ? "checked" : ""} />
             <i aria-hidden="true"></i>
           </label>
+          <div class="synthesis-delays">
+            <div class="subsection-heading">
+              <strong>合成步骤延迟</strong>
+              <span>每个步骤在响应前额外等待，单位为毫秒，默认 0。</span>
+            </div>
+            <div class="form-grid delay-fields">
+              ${renderDelayField(instance, "pronunciation", "发音 pronunciation")}
+              ${renderDelayField(instance, "phoneme", "音素 phoneme")}
+              ${renderDelayField(instance, "duration", "时长 duration")}
+              ${renderDelayField(instance, "parameter", "参数 parameter")}
+              ${renderDelayField(instance, "audio", "音频 audio")}
+            </div>
+          </div>
         </div>
       </section>
       ${renderArchitectureSection(instance)}
     `;
+  }
+
+  function renderDelayField(instance, step, label) {
+    const delay = instance.synthesis_delays_ms?.[step] ?? 0;
+    return field(
+      label,
+      `<div class="input-suffix"><input data-delay-step="${step}" type="number" min="0" max="3600000" step="1" value="${escapeHtml(delay)}" /><span>ms</span></div>`,
+    );
   }
 
   function renderValidationSummary(issues) {
@@ -719,10 +758,10 @@
   }
 
   function renderSingerEditor(singer) {
-    const languages = singer.languages ?? [];
+    const languages = Object.entries(singer.languages ?? {});
     const defaultOptions = languages.length
-      ? languages.map((language) => `<option value="${escapeHtml(language)}" ${language === singer.default_language ? "selected" : ""}>${escapeHtml(language)}</option>`).join("")
-      : '<option value="">请先填写语言列表</option>';
+      ? languages.map(([code, info]) => `<option value="${escapeHtml(code)}" ${code === singer.default_language ? "selected" : ""}>${escapeHtml(info.name)} (${escapeHtml(code)})</option>`).join("")
+      : '<option value="">请先添加语言</option>';
     return `
       <div class="singer-editor">
         <div class="editor-heading subtle">
@@ -733,9 +772,19 @@
           ${field("歌手 ID", `<input data-singer-field="id" type="text" value="${escapeHtml(singer.id)}" spellcheck="false" />`)}
           ${field("显示名称", `<input data-singer-field="name" type="text" value="${escapeHtml(singer.name)}" />`)}
           ${field("混合组 ID", `<input data-singer-field="mix_group" type="text" value="${escapeHtml(singer.mix_group)}" spellcheck="false" />`, "只有同一 mix group 中的歌手才应被混合。")}
-          ${field("支持语言", `<input data-singer-field="languages" type="text" value="${escapeHtml(languages.join(", "))}" placeholder="zh, en, ja" spellcheck="false" />`, "使用逗号分隔，至少一项。")}
           ${field("默认语言", `<select data-singer-field="default_language">${defaultOptions}</select>`, "必须包含在支持语言中。")}
           ${field("Mock key", `<input data-singer-field="mock_key" type="text" value="${escapeHtml(singer.mock_key)}" spellcheck="false" />`, "相同 key 始终生成相同的标识与音色。", "span-2")}
+        </div>
+        <div class="language-section">
+          <div class="demo-heading">
+            <div><strong>支持语言</strong><span>每个语言代码都需要显示名称和新建音符使用的默认歌词。</span></div>
+            <button class="button ghost small" data-action="add-language" type="button">+ 添加语言</button>
+          </div>
+          <div class="language-list">
+            ${languages.length
+              ? languages.map(([code, info], index) => `<div class="language-row"><span class="demo-number">${index + 1}</span><label class="compact-field"><span>语言代码</span><input data-language-index="${index}" data-language-code type="text" value="${escapeHtml(code)}" placeholder="zh" spellcheck="false" /></label><label class="compact-field"><span>显示名称</span><input data-language-index="${index}" data-language-field="name" type="text" value="${escapeHtml(info.name)}" placeholder="中文" /></label><label class="compact-field"><span>默认歌词</span><input data-language-index="${index}" data-language-field="default_lyric" type="text" value="${escapeHtml(info.default_lyric)}" placeholder="啦" /></label><button class="row-delete" data-action="delete-language" data-language-index="${index}" type="button" title="删除语言" aria-label="删除语言">×</button></div>`).join("")
+              : '<div class="mini-empty compact">至少添加一种支持语言。</div>'}
+          </div>
         </div>
         <div class="demo-section">
           <div class="demo-heading">
@@ -791,6 +840,10 @@
     const visible = [...items]
       .sort((left, right) => logTimeValue(right) - logTimeValue(left))
       .slice(0, 200);
+    const retainedIdentities = new Set(state.logs.map(logIdentity));
+    state.expandedLogs.forEach((identity) => {
+      if (!retainedIdentities.has(identity)) state.expandedLogs.delete(identity);
+    });
     dom.logSummary.textContent = state.logsPaused
       ? `已暂停 · 当前视图 ${items.length} 条`
       : `自动刷新 · 当前视图 ${items.length} 条${items.length > 200 ? "（显示最新 200 条）" : ""}`;
@@ -807,6 +860,8 @@
   }
 
   function renderLogRow(log) {
+    const identity = logIdentity(log);
+    const expanded = state.expandedLogs.has(identity);
     const timestamp = formatTimestamp(log.timestamp ?? log.time ?? log.created_at);
     const method = String(log.method ?? log.request?.method ?? "REQ").toUpperCase();
     const path = log.path ?? log.url ?? log.request?.path ?? "未知路径";
@@ -820,7 +875,7 @@
       ? numericStatus >= 500 ? "server-error" : numericStatus >= 400 ? "client-error" : numericStatus >= 300 ? "redirect" : "ok"
       : "neutral";
     return `
-      <article class="log-entry">
+      <article class="log-entry" data-log-identity="${escapeHtml(identity)}">
         <div class="log-line">
           <time>${escapeHtml(timestamp)}</time>
           <span class="method-badge method-${escapeHtml(method.toLowerCase())}">${escapeHtml(method)}</span>
@@ -829,9 +884,9 @@
           <span class="log-instance">${escapeHtml(instance)}</span>
           <span class="response-status ${statusClass}">${escapeHtml(status)}</span>
           ${duration != null ? `<span class="duration">${escapeHtml(Number(duration).toFixed(Number(duration) < 10 ? 1 : 0))} ms</span>` : ""}
-          <button class="log-expand" type="button" aria-label="展开日志详情" title="查看请求与响应">›</button>
+          <button class="log-expand${expanded ? " expanded" : ""}" type="button" aria-label="${expanded ? "收起" : "展开"}日志详情" aria-expanded="${expanded}" title="查看请求与响应">›</button>
         </div>
-        <div class="log-detail" hidden>
+        <div class="log-detail"${expanded ? "" : " hidden"}>
           <div><strong>请求</strong><pre>${escapeHtml(formatPayload(requestBody))}</pre></div>
           <div><strong>响应</strong><pre>${escapeHtml(formatPayload(responseBody))}</pre></div>
         </div>
@@ -923,6 +978,11 @@
     if (!String(instance.host ?? "").trim()) issues.push(`${prefix}监听主机不能为空`);
     if (!Number.isInteger(Number(instance.port)) || Number(instance.port) < 1 || Number(instance.port) > 65535) issues.push(`${prefix}端口必须在 1–65535 之间`);
     if (!(Number(instance.parameter_sample_rate) > 0 && Number(instance.parameter_sample_rate) <= 10000)) issues.push(`${prefix}参数采样率必须在 0–10000 Hz 之间`);
+    Object.entries(instance.synthesis_delays_ms ?? {}).forEach(([step, delay]) => {
+      if (!(Number(delay) >= 0 && Number(delay) <= 3600000)) {
+        issues.push(`${prefix}的 ${step} 延迟必须在 0–3600000 ms 之间`);
+      }
+    });
     if (!Number.isInteger(Number(instance.resource_ttl_seconds)) || Number(instance.resource_ttl_seconds) < 1 || Number(instance.resource_ttl_seconds) > 86400) issues.push(`${prefix}资源 TTL 必须在 1–86400 秒之间`);
     const archIds = new Set();
     const mockKeys = new Set();
@@ -965,9 +1025,14 @@
         const normalizedMockKey = String(singer.mock_key ?? "").trim();
         if (mockKeys.has(normalizedMockKey)) issues.push(`${prefix}中 Mock key“${normalizedMockKey}”重复`);
         mockKeys.add(normalizedMockKey);
-        if (!singer.languages.length) issues.push(`${singerLabel}至少需要一种语言`);
-        if (new Set(singer.languages).size !== singer.languages.length) issues.push(`${singerLabel}语言不能重复`);
-        if (!singer.languages.includes(singer.default_language)) issues.push(`${singerLabel}默认语言必须位于语言列表中`);
+        const languages = Object.entries(singer.languages ?? {});
+        if (!languages.length) issues.push(`${singerLabel}至少需要一种语言`);
+        languages.forEach(([code, info]) => {
+          if (!String(code).trim()) issues.push(`${singerLabel}语言代码不能为空`);
+          if (typeof info?.name !== "string") issues.push(`${singerLabel}语言“${code}”缺少显示名称`);
+          if (typeof info?.default_lyric !== "string") issues.push(`${singerLabel}语言“${code}”缺少默认歌词`);
+        });
+        if (!Object.hasOwn(singer.languages ?? {}, singer.default_language)) issues.push(`${singerLabel}默认语言必须位于语言列表中`);
       });
     });
     return [...new Set(issues)];
@@ -1196,6 +1261,12 @@
     const singer = currentSinger();
     if (!instance) return false;
 
+    if (target.dataset.delayStep) {
+      instance.synthesis_delays_ms[target.dataset.delayStep] = toNumber(target.value);
+      markDirty();
+      return true;
+    }
+
     if (target.dataset.instanceField) {
       const key = target.dataset.instanceField;
       if (target.type === "checkbox") instance[key] = target.checked;
@@ -1269,12 +1340,35 @@
     }
     if (target.dataset.singerField && singer) {
       const key = target.dataset.singerField;
-      if (key === "languages") {
-        singer.languages = splitLanguages(target.value);
-        if (!singer.languages.includes(singer.default_language)) singer.default_language = singer.languages[0] ?? "";
-      } else singer[key] = target.value;
+      singer[key] = target.value;
       markDirty();
-      if (eventType === "change" && ["languages", "id", "name", "mock_key"].includes(key)) renderWorkspace();
+      if (eventType === "change" && ["id", "name", "mock_key"].includes(key)) renderWorkspace();
+      return true;
+    }
+    if (target.dataset.languageIndex !== undefined && singer && !target.dataset.action) {
+      const entries = Object.entries(singer.languages ?? {});
+      const index = Number(target.dataset.languageIndex);
+      const entry = entries[index];
+      if (!entry) return true;
+      const [code, info] = entry;
+      if (target.dataset.languageCode !== undefined) {
+        if (eventType !== "change") return true;
+        const newCode = target.value.trim();
+        if (!newCode || (newCode !== code && Object.hasOwn(singer.languages, newCode))) {
+          target.setCustomValidity(newCode ? "语言代码不能重复" : "语言代码不能为空");
+          target.reportValidity();
+          return true;
+        }
+        target.setCustomValidity("");
+        entries[index] = [newCode, info];
+        singer.languages = Object.fromEntries(entries);
+        if (singer.default_language === code) singer.default_language = newCode;
+        markDirty();
+        renderWorkspace();
+        return true;
+      }
+      info[target.dataset.languageField] = target.value;
+      markDirty();
       return true;
     }
     if (target.dataset.demoIndex !== undefined && singer && !target.dataset.action) {
@@ -1364,6 +1458,21 @@
       state.selectedSinger = Math.max(0, state.selectedSinger - 1);
       markDirty();
       renderWorkspace();
+    } else if (action === "add-language" && singer) {
+      const code = uniqueId("lang", Object.keys(singer.languages));
+      singer.languages[code] = { name: "新语言", default_lyric: "la" };
+      singer.default_language ||= code;
+      markDirty();
+      renderWorkspace();
+    } else if (action === "delete-language" && singer) {
+      const entries = Object.entries(singer.languages);
+      const removed = entries.splice(Number(button.dataset.languageIndex), 1)[0];
+      singer.languages = Object.fromEntries(entries);
+      if (removed && singer.default_language === removed[0]) {
+        singer.default_language = entries[0]?.[0] ?? "";
+      }
+      markDirty();
+      renderWorkspace();
     } else if (action === "add-demo" && singer) {
       singer.demo_audios.push({ name: "" });
       markDirty();
@@ -1410,15 +1519,22 @@
     dom.clearLogsButton.addEventListener("click", () => {
       state.logs = [];
       state.seenLogs.clear();
+      state.expandedLogs.clear();
       renderLogs();
     });
     dom.logList.addEventListener("click", (event) => {
       const button = event.target.closest(".log-expand");
       if (!button) return;
-      const detail = button.closest(".log-entry").querySelector(".log-detail");
+      const entry = button.closest(".log-entry");
+      const detail = entry.querySelector(".log-detail");
       detail.hidden = !detail.hidden;
-      button.classList.toggle("expanded", !detail.hidden);
-      button.setAttribute("aria-expanded", String(!detail.hidden));
+      const expanded = !detail.hidden;
+      button.classList.toggle("expanded", expanded);
+      button.setAttribute("aria-expanded", String(expanded));
+      button.setAttribute("aria-label", `${expanded ? "收起" : "展开"}日志详情`);
+      const identity = entry.dataset.logIdentity;
+      if (expanded) state.expandedLogs.add(identity);
+      else state.expandedLogs.delete(identity);
     });
     window.addEventListener("beforeunload", (event) => {
       if (!state.dirty) return;

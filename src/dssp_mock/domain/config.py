@@ -28,6 +28,14 @@ class MediaMode(StrEnum):
     HTTP = "http"
 
 
+class SynthesisDelaysConfig(BaseModel):
+    pronunciation: float = Field(default=0.0, ge=0, le=3_600_000)
+    phoneme: float = Field(default=0.0, ge=0, le=3_600_000)
+    duration: float = Field(default=0.0, ge=0, le=3_600_000)
+    parameter: float = Field(default=0.0, ge=0, le=3_600_000)
+    audio: float = Field(default=0.0, ge=0, le=3_600_000)
+
+
 def _validate_identifier(value: str) -> str:
     value = value.strip()
     if not value:
@@ -80,11 +88,16 @@ class DemoAudioConfig(BaseModel):
     name: str = ""
 
 
+class SingerLanguageConfig(BaseModel):
+    name: str
+    default_lyric: str
+
+
 class SingerConfig(BaseModel):
     id: str
     name: str
     mix_group: str
-    languages: list[str] = Field(min_length=1)
+    languages: dict[str, SingerLanguageConfig] = Field(min_length=1)
     default_language: str
     mock_key: str
     demo_audios: list[DemoAudioConfig] = Field(default_factory=list)
@@ -101,13 +114,29 @@ class SingerConfig(BaseModel):
             raise ValueError("value must not be blank")
         return value.strip()
 
+    @field_validator("languages", mode="before")
+    @classmethod
+    def migrate_legacy_languages(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        if not all(isinstance(language, str) for language in value):
+            return value
+        if len(value) != len(set(value)):
+            raise ValueError("languages must not contain duplicates")
+        return {
+            language: {"name": language, "default_lyric": "la"}
+            for language in value
+        }
+
     @field_validator("languages")
     @classmethod
-    def valid_languages(cls, value: list[str]) -> list[str]:
-        cleaned = [item.strip() for item in value]
-        if any(not item for item in cleaned):
-            raise ValueError("languages must not contain blank entries")
-        if len(cleaned) != len(set(cleaned)):
+    def valid_languages(
+        cls, value: dict[str, SingerLanguageConfig]
+    ) -> dict[str, SingerLanguageConfig]:
+        cleaned = {code.strip(): info for code, info in value.items()}
+        if any(not code for code in cleaned):
+            raise ValueError("language codes must not be blank")
+        if len(cleaned) != len(value):
             raise ValueError("languages must not contain duplicates")
         return cleaned
 
@@ -188,6 +217,7 @@ class MockInstanceConfig(BaseModel):
     port: int = Field(default=13711, ge=1, le=65535)
     autostart: bool = True
     parameter_sample_rate: float = Field(default=100.0, gt=0, le=10_000)
+    synthesis_delays_ms: SynthesisDelaysConfig = Field(default_factory=SynthesisDelaysConfig)
     media_mode: MediaMode = MediaMode.DATA_URL
     resource_ttl_seconds: int = Field(default=300, ge=1, le=86_400)
     architectures: list[ArchitectureConfig] = Field(default_factory=list)
@@ -258,24 +288,104 @@ def default_config() -> AppConfig:
                 name="Default mock",
                 architectures=[
                     ArchitectureConfig(
-                        id="mock-singing-v1",
-                        name="Mock Singing V1",
+                        id="diffsinger",
+                        name="DiffSinger",
                         parameters=[
-                            ParameterConfig(name="pitch", type=ParameterType.INDIRECT),
+                            ParameterConfig(
+                                name="expressiveness",
+                                type=ParameterType.DIRECT,
+                                min_value=0.0,
+                                max_value=1_000.0,
+                            ),
+                            ParameterConfig(
+                                name="pitch",
+                                type=ParameterType.INDIRECT,
+                                depends_on=["expressiveness"],
+                            ),
                             ParameterConfig(
                                 name="energy",
                                 type=ParameterType.INDIRECT,
                                 depends_on=["pitch"],
+                                min_value=-96_000.0,
+                                max_value=0.0,
                             ),
-                            ParameterConfig(name="breathiness", type=ParameterType.DIRECT),
+                            ParameterConfig(
+                                name="breathiness",
+                                type=ParameterType.INDIRECT,
+                                depends_on=["pitch"],
+                                min_value=-96_000.0,
+                                max_value=0.0,
+                            ),
+                            ParameterConfig(
+                                name="tension",
+                                type=ParameterType.INDIRECT,
+                                depends_on=["pitch"],
+                                min_value=-10_000.0,
+                                max_value=10_000.0,
+                            ),
+                            ParameterConfig(
+                                name="voicing",
+                                type=ParameterType.INDIRECT,
+                                depends_on=["pitch"],
+                                min_value=-96_000.0,
+                                max_value=0.0,
+                            ),
+                            ParameterConfig(
+                                name="mouth_opening",
+                                type=ParameterType.INDIRECT,
+                                depends_on=["pitch"],
+                                min_value=0.0,
+                                max_value=1_000.0,
+                            ),
+                            ParameterConfig(
+                                name="gender",
+                                type=ParameterType.DIRECT,
+                                min_value=-1_000.0,
+                                max_value=1_000.0,
+                            ),
+                            ParameterConfig(
+                                name="velocity",
+                                type=ParameterType.DIRECT,
+                                min_value=-1_000.0,
+                                max_value=1_000.0,
+                            ),
+                            ParameterConfig(
+                                name="tone_shift",
+                                type=ParameterType.DIRECT,
+                                min_value=-1_200.0,
+                                max_value=1_200.0,
+                            ),
                         ],
-                        audio_dependencies=["pitch"],
+                        audio_dependencies=[
+                            "pitch",
+                            "breathiness",
+                            "tension",
+                            "voicing",
+                            "energy",
+                            "mouth_opening",
+                            "gender",
+                            "velocity",
+                            "tone_shift",
+                        ],
                         singers=[
                             SingerConfig(
                                 id="demo-singer",
                                 name="Demo Singer",
                                 mix_group="default",
-                                languages=["zh", "en", "ja"],
+                                languages={
+                                    "zh": SingerLanguageConfig(
+                                        name="中文",
+                                        default_lyric="啦",
+                                    ),
+                                    "en": SingerLanguageConfig(
+                                        name="English",
+                                        default_lyric="la",
+                                    ),
+                                    "ja": SingerLanguageConfig(
+                                        name="日本語",
+                                        default_lyric="ラ",
+                                    ),
+                                },
                                 default_language="zh",
                                 mock_key="demo-singer",
                                 demo_audios=[

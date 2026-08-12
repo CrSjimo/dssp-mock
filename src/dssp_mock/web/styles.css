@@ -653,6 +653,29 @@ textarea:disabled {
   grid-template-columns: repeat(4, minmax(135px, 1fr));
 }
 
+.synthesis-delays {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.subsection-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.subsection-heading span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.delay-fields {
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+}
+
 .input-suffix {
   display: flex;
   min-width: 0;
@@ -1271,6 +1294,7 @@ textarea:disabled {
   grid-template-columns: repeat(4, minmax(135px, 1fr));
 }
 
+.language-section,
 .demo-section {
   margin-top: 17px;
   border-top: 1px solid var(--line);
@@ -1289,6 +1313,24 @@ textarea:disabled {
   display: grid;
   margin-top: 10px;
   gap: 7px;
+}
+
+.language-list {
+  display: grid;
+  margin-top: 10px;
+  gap: 8px;
+}
+
+.language-row {
+  display: grid;
+  grid-template-columns: 27px minmax(100px, 0.65fr) minmax(140px, 1fr) minmax(140px, 1fr) 30px;
+  align-items: end;
+  gap: 8px;
+}
+
+.language-row .demo-number,
+.language-row .row-delete {
+  margin-bottom: 2px;
 }
 
 .demo-row {
@@ -1825,6 +1867,19 @@ textarea:disabled {
 
   .demo-row {
     grid-template-columns: 27px minmax(0, 1fr) 30px;
+  }
+
+  .language-row {
+    grid-template-columns: 27px minmax(0, 1fr) 30px;
+  }
+
+  .language-row .compact-field {
+    grid-column: 2;
+  }
+
+  .language-row .row-delete {
+    grid-column: 3;
+    grid-row: 1;
   }
 
   .melody-mark { display: none; }

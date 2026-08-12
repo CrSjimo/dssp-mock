@@ -19,7 +19,7 @@ from dssp_mock.repositories.config_repository import ConfigRepository
 from dssp_mock.services.request_log import RequestLogStore
 from dssp_mock.services.resource_store import ResourceStore, resource_app
 
-ARCH_ID = "mock-singing-v1"
+ARCH_ID = "diffsinger"
 PRIMARY_SINGER_ID = "demo-singer"
 SECONDARY_SINGER_ID = "second-singer"
 
@@ -42,7 +42,10 @@ def api(tmp_path_factory: pytest.TempPathFactory) -> Iterator[ApiHarness]:
             id=SECONDARY_SINGER_ID,
             name="Second Singer",
             mix_group="default",
-            languages=["zh", "en"],
+            languages={
+                "zh": {"name": "中文", "default_lyric": "啦"},
+                "en": {"name": "English", "default_lyric": "la"},
+            },
             default_language="zh",
             mock_key="second-singer-key",
         )
@@ -126,12 +129,22 @@ def test_all_metadata_and_media_endpoints(api: ApiHarness) -> None:
     assert [item["id"] for item in architectures.json()] == [ARCH_ID]
     assert architectures.json()[0]["parameters"]["pitch"] == {
         "type": "INDIRECT",
-        "depends_on": [],
+        "depends_on": ["expressiveness"],
     }
 
     architecture = api.client.get(f"/v1/arch/{ARCH_ID}")
     assert architecture.status_code == 200
-    assert architecture.json()["audio_dependencies"] == ["pitch"]
+    assert architecture.json()["audio_dependencies"] == [
+        "pitch",
+        "breathiness",
+        "tension",
+        "voicing",
+        "energy",
+        "mouth_opening",
+        "gender",
+        "velocity",
+        "tone_shift",
+    ]
 
     all_singers = api.client.get("/v1/singer")
     assert all_singers.status_code == 200
@@ -146,6 +159,12 @@ def test_all_metadata_and_media_endpoints(api: ApiHarness) -> None:
 
     singer = api.client.get(f"/v1/arch/{ARCH_ID}/singer/{PRIMARY_SINGER_ID}")
     assert singer.status_code == 200
+    assert singer.json()["languages"] == {
+        "zh": {"name": "中文", "default_lyric": "啦"},
+        "en": {"name": "English", "default_lyric": "la"},
+        "ja": {"name": "日本語", "default_lyric": "ラ"},
+    }
+    assert singer.json()["default_language"] == "zh"
     assert singer.json()["arch_specific_info"] is None
     assert singer.json()["default_extra"] is None
 
@@ -267,11 +286,12 @@ def test_duration_starts_are_deterministic_increasing_and_onset_anchored(
 def test_parameter_retake_resamples_and_clips_the_complete_curve(api: ApiHarness) -> None:
     payload = _parameter_payload(
         {
+            "expressiveness": {"values": [1000.0], "sample_rate": 10.0},
             "pitch": {
                 "values": [20_000.0, 6900.0, -500.0],
                 "sample_rate": 10.0,
                 "retake": {"position": 1, "length": 1},
-            }
+            },
         }
     )
 
@@ -328,7 +348,7 @@ def test_parameter_uses_its_configured_response_range(api: ApiHarness) -> None:
     [
         (
             {
-                "breathiness": {
+                "expressiveness": {
                     "values": [0.0],
                     "sample_rate": 10.0,
                     "retake": {"position": 0, "length": 1},
@@ -369,7 +389,17 @@ def test_audio_returns_44100_hz_mono_wav_near_minus_24_dbfs(api: ApiHarness) -> 
             "notes": [_parameter_note(0.1)],
             "mix": [[]],
             "mix_sample_rate": 10.0,
-            "parameters": {"pitch": {"values": [6900.0, 7000.0], "sample_rate": 10.0}},
+            "parameters": {
+                "pitch": {"values": [6900.0, 7000.0], "sample_rate": 10.0},
+                "breathiness": {"values": [-12_000.0], "sample_rate": 10.0},
+                "tension": {"values": [0.0], "sample_rate": 10.0},
+                "voicing": {"values": [-12_000.0], "sample_rate": 10.0},
+                "energy": {"values": [-12_000.0], "sample_rate": 10.0},
+                "mouth_opening": {"values": [500.0], "sample_rate": 10.0},
+                "gender": {"values": [0.0], "sample_rate": 10.0},
+                "velocity": {"values": [0.0], "sample_rate": 10.0},
+                "tone_shift": {"values": [0.0], "sample_rate": 10.0},
+            },
         },
     }
 
@@ -387,6 +417,96 @@ def test_audio_returns_44100_hz_mono_wav_near_minus_24_dbfs(api: ApiHarness) -> 
     samples = np.frombuffer(frames, dtype="<i2").astype(np.float64) / 32768.0
     rms = float(np.sqrt(np.mean(np.square(samples))))
     assert 20.0 * math.log10(rms) == pytest.approx(-24.0, abs=0.2)
+
+
+def test_each_synthesis_step_uses_its_configured_delay(
+    api: ApiHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = api.repository.get()
+    changed = original.model_copy(deep=True)
+    delays = changed.instances[0].synthesis_delays_ms
+    delays.pronunciation = 11
+    delays.phoneme = 22
+    delays.duration = 33
+    delays.parameter = 44
+    delays.audio = 55
+    api.repository.replace(changed)
+    sleep_seconds: list[float] = []
+    monkeypatch.setattr("dssp_mock.api.mock.time.sleep", sleep_seconds.append)
+
+    try:
+        responses = [
+            api.client.post(
+                "/v1/synth/pronunciation",
+                json={
+                    "context": _single_context(),
+                    "input": {"notes": [{"lyric": "la", "language": "zh"}]},
+                },
+            ),
+            api.client.post(
+                "/v1/synth/phoneme",
+                json={
+                    "context": _single_context(),
+                    "input": {"notes": [{"pronunciation": "la", "language": "zh"}]},
+                },
+            ),
+            api.client.post(
+                "/v1/synth/duration",
+                json={
+                    "context": _multi_context(),
+                    "input": {
+                        "piece_duration": 0.3,
+                        "notes": [_parameter_note()],
+                        "mix": [[]],
+                        "mix_sample_rate": 10.0,
+                    },
+                },
+            ),
+            api.client.post("/v1/synth/parameter", json=_parameter_payload({})),
+            api.client.post(
+                "/v1/synth/audio",
+                json={
+                    "context": _multi_context(),
+                    "input": {
+                        "piece_duration": 0.12,
+                        "notes": [_parameter_note(0.1)],
+                        "mix": [[]],
+                        "mix_sample_rate": 10.0,
+                        "parameters": {
+                            "pitch": {"values": [6900.0], "sample_rate": 10.0},
+                            "breathiness": {
+                                "values": [-12_000.0],
+                                "sample_rate": 10.0,
+                            },
+                            "tension": {"values": [0.0], "sample_rate": 10.0},
+                            "voicing": {
+                                "values": [-12_000.0],
+                                "sample_rate": 10.0,
+                            },
+                            "energy": {
+                                "values": [-12_000.0],
+                                "sample_rate": 10.0,
+                            },
+                            "mouth_opening": {
+                                "values": [500.0],
+                                "sample_rate": 10.0,
+                            },
+                            "gender": {"values": [0.0], "sample_rate": 10.0},
+                            "velocity": {"values": [0.0], "sample_rate": 10.0},
+                            "tone_shift": {
+                                "values": [0.0],
+                                "sample_rate": 10.0,
+                            },
+                        },
+                    },
+                },
+            ),
+        ]
+    finally:
+        api.repository.replace(original)
+
+    assert all(response.status_code == 200 for response in responses)
+    assert sleep_seconds == pytest.approx([0.011, 0.022, 0.033, 0.044, 0.055])
 
 
 def test_missing_api_resource_and_invalid_schema_are_problem_json(api: ApiHarness) -> None:

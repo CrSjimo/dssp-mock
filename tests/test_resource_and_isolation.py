@@ -61,7 +61,9 @@ def test_mock_apps_read_only_their_own_instance_configuration(tmp_path) -> None:
                             id="other-singer",
                             name="Other Singer",
                             mix_group="other",
-                            languages=["en"],
+                            languages={
+                                "en": {"name": "English", "default_lyric": "la"}
+                            },
                             default_language="en",
                             mock_key="demo-singer",
                         )
@@ -78,10 +80,10 @@ def test_mock_apps_read_only_their_own_instance_configuration(tmp_path) -> None:
     second = create_mock_app("isolated", repository, resources, logs, "http://resources.test")
 
     with TestClient(first) as first_client, TestClient(second) as second_client:
-        assert [item["id"] for item in first_client.get("/v1/arch").json()] == ["mock-singing-v1"]
+        assert [item["id"] for item in first_client.get("/v1/arch").json()] == ["diffsinger"]
         assert [item["id"] for item in second_client.get("/v1/arch").json()] == ["other-arch"]
         assert first_client.get("/v1/arch/other-arch").status_code == 404
-        assert second_client.get("/v1/arch/mock-singing-v1").status_code == 404
+        assert second_client.get("/v1/arch/diffsinger").status_code == 404
 
 
 def test_http_media_mode_returns_shared_ephemeral_resource_url(tmp_path) -> None:
@@ -100,7 +102,7 @@ def test_http_media_mode_returns_shared_ephemeral_resource_url(tmp_path) -> None
     )
 
     with TestClient(app) as client:
-        response = client.get("/v1/arch/mock-singing-v1/singer/demo-singer/avatar")
+        response = client.get("/v1/arch/diffsinger/singer/demo-singer/avatar")
 
     assert response.status_code == 200
     url = response.json()["avatar_url"]

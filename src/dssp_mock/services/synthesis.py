@@ -59,7 +59,10 @@ def singer_metadata(arch: ArchitectureConfig, singer: SingerConfig) -> dict:
         "name": singer.name,
         "arch": arch.id,
         "mix_group": singer.mix_group,
-        "languages": list(singer.languages),
+        "languages": {
+            code: info.model_dump(mode="json")
+            for code, info in singer.languages.items()
+        },
         "default_language": singer.default_language,
         "arch_specific_info": None,
         "default_extra": None,

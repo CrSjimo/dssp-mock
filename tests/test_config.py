@@ -8,6 +8,8 @@ from dssp_mock.domain.config import (
     MockInstanceConfig,
     ParameterConfig,
     ParameterType,
+    SingerConfig,
+    default_config,
 )
 
 
@@ -70,6 +72,48 @@ def test_instance_uses_required_parameter_rate_and_resource_ttl_defaults() -> No
 
     assert instance.parameter_sample_rate == pytest.approx(100.0)
     assert instance.resource_ttl_seconds == 300
+    assert instance.synthesis_delays_ms.model_dump() == {
+        "pronunciation": 0.0,
+        "phoneme": 0.0,
+        "duration": 0.0,
+        "parameter": 0.0,
+        "audio": 0.0,
+    }
+
+
+def test_synthesis_delays_reject_negative_values() -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        MockInstanceConfig(
+            id="instance",
+            name="Instance",
+            synthesis_delays_ms={"audio": -1},
+        )
+
+
+def test_singer_languages_include_metadata_and_migrate_legacy_lists() -> None:
+    singer = SingerConfig(
+        id="singer",
+        name="Singer",
+        mix_group="default",
+        languages={"zh": {"name": "中文", "default_lyric": "啦"}},
+        default_language="zh",
+        mock_key="singer",
+    )
+    legacy = SingerConfig(
+        id="legacy",
+        name="Legacy",
+        mix_group="default",
+        languages=["en"],
+        default_language="en",
+        mock_key="legacy",
+    )
+
+    assert singer.model_dump()["languages"] == {
+        "zh": {"name": "中文", "default_lyric": "啦"}
+    }
+    assert legacy.model_dump()["languages"] == {
+        "en": {"name": "en", "default_lyric": "la"}
+    }
 
 
 def test_parameter_ranges_default_and_pitch_is_always_fixed() -> None:
@@ -78,6 +122,44 @@ def test_parameter_ranges_default_and_pitch_is_always_fixed() -> None:
 
     assert (regular.min_value, regular.max_value) == (-1000.0, 1000.0)
     assert (pitch.min_value, pitch.max_value) == (0.0, 12_800.0)
+
+
+def test_default_architecture_matches_diffsinger_parameter_contract() -> None:
+    architecture = default_config().instances[0].architectures[0]
+    parameters = {
+        parameter.name: (
+            parameter.type,
+            parameter.depends_on,
+            parameter.min_value,
+            parameter.max_value,
+        )
+        for parameter in architecture.parameters
+    }
+
+    assert (architecture.id, architecture.name) == ("diffsinger", "DiffSinger")
+    assert parameters == {
+        "expressiveness": (ParameterType.DIRECT, [], 0.0, 1_000.0),
+        "pitch": (ParameterType.INDIRECT, ["expressiveness"], 0.0, 12_800.0),
+        "energy": (ParameterType.INDIRECT, ["pitch"], -96_000.0, 0.0),
+        "breathiness": (ParameterType.INDIRECT, ["pitch"], -96_000.0, 0.0),
+        "tension": (ParameterType.INDIRECT, ["pitch"], -10_000.0, 10_000.0),
+        "voicing": (ParameterType.INDIRECT, ["pitch"], -96_000.0, 0.0),
+        "mouth_opening": (ParameterType.INDIRECT, ["pitch"], 0.0, 1_000.0),
+        "gender": (ParameterType.DIRECT, [], -1_000.0, 1_000.0),
+        "velocity": (ParameterType.DIRECT, [], -1_000.0, 1_000.0),
+        "tone_shift": (ParameterType.DIRECT, [], -1_200.0, 1_200.0),
+    }
+    assert architecture.audio_dependencies == [
+        "pitch",
+        "breathiness",
+        "tension",
+        "voicing",
+        "energy",
+        "mouth_opening",
+        "gender",
+        "velocity",
+        "tone_shift",
+    ]
 
 
 @pytest.mark.parametrize(

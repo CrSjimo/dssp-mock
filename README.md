@@ -59,6 +59,10 @@ POST /v1/synth/audio
 
 FastAPI 生成的交互文档位于每个实例的 `/docs`。
 
+歌手元数据中的 `languages` 是以语言代码为键的对象；每种语言均返回显示名称
+`name` 和用于新建音符的默认歌词 `default_lyric`。管理界面可逐项配置这些值，
+`default_language` 必须是其中一个语言代码。
+
 ### 参数 retake
 
 - 不带 `retake` 的参数只作为输入或依赖，不出现在参数合成结果中。
@@ -66,6 +70,11 @@ FastAPI 生成的交互文档位于每个实例的 `/docs`。
 - `retake.position` 和 `retake.length` 按该输入参数自身采样率下的点索引解释。
 - DIRECT 参数不能 retake；INDIRECT 参数 retake 时必须提供全部依赖。
 - pitch 输出固定限制到 `[0, 12800]`；其它参数分别使用管理界面中配置的最小值/最大值（默认 `[-1000, 1000]`）。输入允许越界，但不允许 NaN/Infinity。
+
+### 合成步骤延迟
+
+每个 Mock 实例可分别配置 pronunciation、phoneme、duration、parameter 和 audio
+五个合成步骤的额外响应延迟。配置单位为毫秒，默认均为 `0`；延迟发生在请求完成校验和生成后、发送响应前。
 
 ### 多歌手 mix
 
