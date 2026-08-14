@@ -6,6 +6,7 @@ import math
 import re
 import wave
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -507,6 +508,30 @@ def test_each_synthesis_step_uses_its_configured_delay(
 
     assert all(response.status_code == 200 for response in responses)
     assert sleep_seconds == pytest.approx([0.011, 0.022, 0.033, 0.044, 0.055])
+
+
+def test_synthesis_requests_have_no_concurrency_limit(api: ApiHarness) -> None:
+    original = api.repository.get()
+    changed = original.model_copy(deep=True)
+    changed.instances[0].synthesis_delays_ms.pronunciation = 100
+    api.repository.replace(changed)
+    payload = {
+        "context": _single_context(),
+        "input": {"notes": [{"lyric": "la", "language": "zh"}]},
+    }
+
+    try:
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            responses = list(
+                executor.map(
+                    lambda _index: api.client.post("/v1/synth/pronunciation", json=payload),
+                    range(6),
+                )
+            )
+    finally:
+        api.repository.replace(original)
+
+    assert [response.status_code for response in responses] == [200] * 6
 
 
 def test_missing_api_resource_and_invalid_schema_are_problem_json(api: ApiHarness) -> None:

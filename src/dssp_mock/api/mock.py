@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from collections.abc import Callable
 from http import HTTPStatus
@@ -66,31 +65,20 @@ def create_mock_app(
         allow_headers=["*"],
     )
     app.add_middleware(RequestLogMiddleware, instance_id=instance_id, store=log_store)
-    synthesis_slots = threading.BoundedSemaphore(value=2)
 
-    def run_limited(
+    def run_operation(
         operation: Callable[[], ResultT], *, synthesis_step: str | None = None
     ) -> ResultT:
-        if not synthesis_slots.acquire(blocking=False):
-            raise ProblemError(
-                429,
-                "Mock instance is busy",
-                "This mock instance already has two synthesis jobs in progress.",
-                problem_type="https://dssp-mock.local/problems/concurrency-limit",
-            )
-        try:
-            delay_ms = 0.0
-            if synthesis_step is not None:
-                instance = repository.get_instance(instance_id)
-                if instance is None:
-                    raise not_found("Mock instance", instance_id)
-                delay_ms = getattr(instance.synthesis_delays_ms, synthesis_step)
-            result = operation()
-            if delay_ms:
-                time.sleep(delay_ms / 1000.0)
-            return result
-        finally:
-            synthesis_slots.release()
+        delay_ms = 0.0
+        if synthesis_step is not None:
+            instance = repository.get_instance(instance_id)
+            if instance is None:
+                raise not_found("Mock instance", instance_id)
+            delay_ms = getattr(instance.synthesis_delays_ms, synthesis_step)
+        result = operation()
+        if delay_ms:
+            time.sleep(delay_ms / 1000.0)
+        return result
 
     def service() -> SynthesisService:
         instance = repository.get_instance(instance_id)
@@ -203,7 +191,7 @@ def create_mock_app(
         current = service()
         arch = current.get_arch(arch_id)
         selected = current.get_singer(arch, singer_id)
-        image_data = run_limited(lambda: avatar_png(selected.mock_key))
+        image_data = run_operation(lambda: avatar_png(selected.mock_key))
         url = media_url(
             image_data,
             "image/png",
@@ -227,7 +215,7 @@ def create_mock_app(
         current = service()
         arch = current.get_arch(arch_id)
         selected = current.get_singer(arch, singer_id)
-        image_data = run_limited(lambda: background_png(selected.mock_key))
+        image_data = run_operation(lambda: background_png(selected.mock_key))
         url = media_url(
             image_data,
             "image/png",
@@ -253,7 +241,7 @@ def create_mock_app(
         selected = current.get_singer(arch, singer_id)
         result = []
         for index, item in enumerate(selected.demo_audios):
-            audio_data = run_limited(
+            audio_data = run_operation(
                 lambda demo_index=index: demo_audio(selected.mock_key, demo_index)
             )
             url = media_url(
@@ -273,35 +261,35 @@ def create_mock_app(
 
     @app.post("/v1/synth/pronunciation", tags=["Synthesis"])
     def pronunciation(request: PronunciationRequest) -> dict:
-        return run_limited(
+        return run_operation(
             lambda: service().pronunciation(request.context, request.input.notes),
             synthesis_step="pronunciation",
         )
 
     @app.post("/v1/synth/phoneme", tags=["Synthesis"])
     def phoneme(request: PhonemeRequest) -> dict:
-        return run_limited(
+        return run_operation(
             lambda: service().phoneme(request.context, request.input.notes),
             synthesis_step="phoneme",
         )
 
     @app.post("/v1/synth/duration", tags=["Synthesis"])
     def duration(request: DurationRequest) -> dict:
-        return run_limited(
+        return run_operation(
             lambda: service().duration(request.context, request.input),
             synthesis_step="duration",
         )
 
     @app.post("/v1/synth/parameter", tags=["Synthesis"])
     def parameter(request: ParameterRequest) -> dict:
-        return run_limited(
+        return run_operation(
             lambda: service().parameter(request.context, request.input),
             synthesis_step="parameter",
         )
 
     @app.post("/v1/synth/audio", tags=["Synthesis"])
     def audio(request: AudioRequest) -> dict:
-        return run_limited(
+        return run_operation(
             lambda: service().audio(request.context, request.input),
             synthesis_step="audio",
         )

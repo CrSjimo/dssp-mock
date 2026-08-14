@@ -108,12 +108,8 @@ def test_singer_languages_include_metadata_and_migrate_legacy_lists() -> None:
         mock_key="legacy",
     )
 
-    assert singer.model_dump()["languages"] == {
-        "zh": {"name": "中文", "default_lyric": "啦"}
-    }
-    assert legacy.model_dump()["languages"] == {
-        "en": {"name": "en", "default_lyric": "la"}
-    }
+    assert singer.model_dump()["languages"] == {"zh": {"name": "中文", "default_lyric": "啦"}}
+    assert legacy.model_dump()["languages"] == {"en": {"name": "en", "default_lyric": "la"}}
 
 
 def test_parameter_ranges_default_and_pitch_is_always_fixed() -> None:

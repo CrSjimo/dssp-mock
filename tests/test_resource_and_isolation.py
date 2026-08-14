@@ -61,9 +61,7 @@ def test_mock_apps_read_only_their_own_instance_configuration(tmp_path) -> None:
                             id="other-singer",
                             name="Other Singer",
                             mix_group="other",
-                            languages={
-                                "en": {"name": "English", "default_lyric": "la"}
-                            },
+                            languages={"en": {"name": "English", "default_lyric": "la"}},
                             default_language="en",
                             mock_key="demo-singer",
                         )

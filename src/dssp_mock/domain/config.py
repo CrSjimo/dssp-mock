@@ -123,10 +123,7 @@ class SingerConfig(BaseModel):
             return value
         if len(value) != len(set(value)):
             raise ValueError("languages must not contain duplicates")
-        return {
-            language: {"name": language, "default_lyric": "la"}
-            for language in value
-        }
+        return {language: {"name": language, "default_lyric": "la"} for language in value}
 
     @field_validator("languages")
     @classmethod
